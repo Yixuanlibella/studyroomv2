@@ -1,0 +1,172 @@
+express = require('express');
+http = require('http');
+socketIo = require('socket.io');
+low = require('lowdb');
+FileSync = require('lowdb/adapters/FileSync');
+
+app = express();
+server = http.createServer(app);
+io = socketIo(server);
+adapter = new FileSync('db.json');
+db = low(adapter);
+
+// Initialize the database
+db.defaults({ messages: [], users: [] }).write();
+
+// Serve the HTML page
+app.get('/', function(req, res) {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Study Room</title>
+              <style>
+                body {
+                    font-family: 'Arial', sans-serif;
+                    margin: 20px;
+                    background-color: #f9f9f9;
+                    color: #4B2E8D; /* NYU Purple */
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                }
+                #chat-container, #whiteboard-container, #timer-container {
+                    background-color: white;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    width: 100%;
+                    max-width: 600px;
+                }
+                h1 {
+                    color: #4B2E8D; /* NYU Purple */
+                    margin-bottom: 10px;
+                }
+                ul {
+                    list-style-type: none;
+                    padding: 0;
+                }
+                li {
+                    padding: 8px;
+                    margin: 5px 0;
+                    border: 1px solid #4B2E8D; /* NYU Purple */
+                    border-radius: 5px;
+                    background-color: #eaeaea;
+                }
+                input[type="text"] {
+                    width: calc(100% - 22px);
+                    padding: 10px;
+                    border: 1px solid #4B2E8D;
+                    border-radius: 5px;
+                    margin-right: 10px;
+                }
+                button {
+                    background-color: #4B2E8D; /* NYU Purple */
+                    color: white;
+                    border: none;
+                    border-radius: 5px;
+                    padding: 10px 15px;
+                    cursor: pointer;
+                    transition: background-color 0.3s;
+                }
+                button:hover {
+                    background-color: #3a2270; /* Darker shade of NYU Purple */
+                }
+                canvas {
+                    border: 2px dashed #4B2E8D; /* NYU Purple */
+                    border-radius: 5px;
+                    margin-top: 10px;
+                }
+                #timer-container {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                }
+                #timer {
+                    font-weight: bold;
+                    color: #4B2E8D;
+                }
+            </style>
+        </head>
+        <body>
+            <div id="chat-container">
+                <ul id="messages"></ul>
+                <input id="message-input" autocomplete="off" placeholder="Type a message..." />
+                <button id="send-button">Send</button>
+            </div>
+            <div id="whiteboard-container">
+                <canvas id="whiteboard" width="600" height="400" style="border:1px solid #000;"></canvas>
+            </div>
+            <div id="timer-container">
+                <p>Session Timer: <span id="timer">00:00</span></p>
+                <button id="start-timer">Start Timer</button>
+            </div>
+            <script src="/socket.io/socket.io.js"></script>
+            <script>
+                socket = io();
+
+                // Handle chat message submission
+                document.getElementById('send-button').onclick = function() {
+                    messageInput = document.getElementById('message-input');
+                    msg = messageInput.value;
+                    socket.emit('chat message', msg);
+                    messageInput.value = '';
+                };
+
+                socket.on('chat message', function(msg) {
+                    item = document.createElement('li');
+                    item.textContent = msg;
+                    document.getElementById('messages').appendChild(item);
+                });
+
+                // Timer functionality
+                timer;
+                isRunning = false;
+                document.getElementById('start-timer').onclick = function() {
+                    if (!isRunning) {
+                        seconds = 0;
+                        timer = setInterval(function() {
+                            seconds++;
+                            minutes = Math.floor(seconds / 60);
+                            secs = seconds % 60;
+                            document.getElementById('timer').textContent = 
+                                String(minutes).padStart(2, '0') + ':' + 
+                                String(secs).padStart(2, '0');
+                        }, 1000);
+                        isRunning = true;
+                    }
+                };
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+io.on('connection', function(socket) {
+    console.log('A user connected');
+
+    // Handle user join
+    socket.on('join', function(username) {
+        db.get('users').push({ id: socket.id, name: username }).write();
+        socket.broadcast.emit('user-joined', username);
+    });
+
+    // Handle chat messages
+    socket.on('chat message', function(msg) {
+        db.get('messages').push({ id: socket.id, message: msg }).write();
+        io.emit('chat message', msg);
+    });
+
+    // Handle disconnection
+    socket.on('disconnect', function() {
+        console.log('A user disconnected');
+        db.get('users').remove({ id: socket.id }).write();
+    });
+});
+
+server.listen(4000, function() {
+    console.log('Server is running on http://localhost:4000');
+});
